@@ -1,102 +1,19 @@
 /**
- * TrendPulse Telegram Bot
+ * TrendPulse Bot — Live Edition
  * ─────────────────────────────────────────
- * Replace YOUR_BOT_TOKEN_HERE with your token from BotFather
- * Replace YOUR_WEBAPP_URL with the URL where you host index.html
+ * Combines Google Trends + Reddit for real hourly trend alerts
+ * Set these in Railway Variables:
+ *   TOKEN      = your Telegram bot token
+ *   WEBAPP_URL = your Netlify Mini App URL
  */
-
-const TOKEN = process.env.TOKEN;
-const WEBAPP_URL = process.env.WEBAPP_URL || "YOUR_WEBAPP_URL"; // set this in Railway variables too
 
 const https = require("https");
 const http = require("http");
 
-// ─── Trend Data ───────────────────────────────────────────────────────────────
-const trends = [
-  {
-    id: 1, cat: "animals", emoji: "🐱", title: "Cat Yoga Challenge",
-    desc: "Cats photobombing their owners doing yoga. Peak chaos energy.",
-    heat: 98, views: "847M", likes: "52M", shares: "8.2M",
-    tags: ["#catyoga", "#petsoftiktok", "#catlife", "#funnycats"],
-    rising: true
-  },
-  {
-    id: 2, cat: "memes", emoji: "😭", title: "This Is Fine Dog",
-    desc: "New wave of 'everything is fine' memes with absurdist twists.",
-    heat: 94, views: "612M", likes: "38M", shares: "11M",
-    tags: ["#thisisfine", "#memegen", "#relateable", "#xyzbca"],
-    rising: false
-  },
-  {
-    id: 3, cat: "toys", emoji: "🪄", title: "Magnetic Sand ASMR",
-    desc: "Kinetic magnetic sand sculptures going absolutely viral.",
-    heat: 91, views: "503M", likes: "29M", shares: "6.7M",
-    tags: ["#magneticsand", "#asmr", "#satisfying", "#oddlysatisfying"],
-    rising: false
-  },
-  {
-    id: 4, cat: "trends", emoji: "💃", title: "Slow Mo Mirror Dance",
-    desc: "Unexpected slow-motion mirror transitions with dramatic music.",
-    heat: 99, views: "1.2B", likes: "79M", shares: "14M",
-    tags: ["#mirrordance", "#slowmo", "#fyp", "#dancechallenge"],
-    rising: true
-  },
-  {
-    id: 5, cat: "animals", emoji: "🐶", title: "Dog Outfit Reviews",
-    desc: "Dogs reviewing their own Halloween outfits. The side-eye is everything.",
-    heat: 86, views: "389M", likes: "24M", shares: "4.1M",
-    tags: ["#dogoutfit", "#dogmom", "#dogsoftiktok", "#petfashion"],
-    rising: false
-  },
-  {
-    id: 6, cat: "memes", emoji: "🤌", title: "Italian Hand Gestures",
-    desc: "Teaching random words using only Italian hand gestures.",
-    heat: 88, views: "445M", likes: "31M", shares: "9.8M",
-    tags: ["#italian", "#handgestures", "#language", "#culturetok"],
-    rising: true
-  },
-  {
-    id: 7, cat: "toys", emoji: "🎮", title: "Rubik's Speed Solve",
-    desc: "Teens solving Rubik's cubes with increasingly dramatic setups.",
-    heat: 82, views: "298M", likes: "19M", shares: "3.4M",
-    tags: ["#speedcubing", "#rubikscube", "#satisfying", "#skills"],
-    rising: false
-  },
-  {
-    id: 8, cat: "trends", emoji: "🌊", title: "Ocean Cleanup POV",
-    desc: "Satisfying ocean cleanup videos with before/after reveals.",
-    heat: 90, views: "567M", likes: "45M", shares: "12M",
-    tags: ["#oceancleanup", "#satisfying", "#earthtok", "#fyp"],
-    rising: true
-  },
-  {
-    id: 9, cat: "animals", emoji: "🐦", title: "Parrot Cooking Reviews",
-    desc: "Parrots critiquing their owners' cooking with surprisingly accurate commentary.",
-    heat: 84, views: "321M", likes: "22M", shares: "5.3M",
-    tags: ["#parrot", "#birdtok", "#cooking", "#funnypets"],
-    rising: false
-  },
-  {
-    id: 10, cat: "trends", emoji: "🎭", title: "Silent Disco In Public",
-    desc: "Spontaneous silent disco flash mobs in shopping malls.",
-    heat: 93, views: "678M", likes: "51M", shares: "13M",
-    tags: ["#silentdisco", "#flashmob", "#publicprank", "#viral"],
-    rising: true
-  }
-];
+const TOKEN = process.env.TOKEN;
+const WEBAPP_URL = process.env.WEBAPP_URL || "";
 
-// ─── State ────────────────────────────────────────────────────────────────────
-// chatId → { alerts: Set<string>, alertsEnabled: boolean }
-const userState = {};
-
-function getUser(chatId) {
-  if (!userState[chatId]) {
-    userState[chatId] = { alerts: new Set(), alertsEnabled: true };
-  }
-  return userState[chatId];
-}
-
-// ─── Telegram API helpers ─────────────────────────────────────────────────────
+// ─── Telegram API ─────────────────────────────────────────────────────────────
 function apiCall(method, payload) {
   return new Promise((resolve, reject) => {
     const body = JSON.stringify(payload);
@@ -128,306 +45,371 @@ function sendMessage(chatId, text, extra = {}) {
     chat_id: chatId,
     text,
     parse_mode: "HTML",
+    disable_web_page_preview: false,
     ...extra
   });
 }
 
-// ─── Message formatters ───────────────────────────────────────────────────────
-function formatTrend(t) {
-  const risingTag = t.rising ? " 📈 <b>RISING</b>" : "";
-  return (
-    `${t.emoji} <b>${t.title}</b>${risingTag}\n` +
-    `📂 Category: <code>${t.cat}</code>\n` +
-    `🔥 Heat: <b>${t.heat}/100</b>\n` +
-    `👁 Views: <b>${t.views}</b>  ❤️ Likes: <b>${t.likes}</b>  🔁 Shares: <b>${t.shares}</b>\n` +
-    `📝 ${t.desc}\n` +
-    `🏷 ${t.tags.join("  ")}`
+function sendPhoto(chatId, photoUrl, caption, extra = {}) {
+  return apiCall("sendPhoto", {
+    chat_id: chatId,
+    photo: photoUrl,
+    caption,
+    parse_mode: "HTML",
+    ...extra
+  });
+}
+
+// ─── HTTP GET helper ──────────────────────────────────────────────────────────
+function fetchUrl(url, headers = {}) {
+  return new Promise((resolve, reject) => {
+    const mod = url.startsWith("https") ? https : http;
+    const options = { headers: { "User-Agent": "TrendPulseBot/1.0 (Telegram Bot)", ...headers } };
+    mod.get(url, options, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        return fetchUrl(res.headers.location, headers).then(resolve).catch(reject);
+      }
+      let data = "";
+      res.on("data", d => data += d);
+      res.on("end", () => resolve({ status: res.statusCode, body: data }));
+    }).on("error", reject);
+  });
+}
+
+// ─── Google Trends RSS ────────────────────────────────────────────────────────
+async function fetchGoogleTrends() {
+  try {
+    const url = "https://trends.google.com/trends/trendingsearches/daily/rss?geo=US";
+    const res = await fetchUrl(url);
+    if (res.status !== 200) return [];
+    const items = [];
+    const itemRegex = /<item>([\s\S]*?)<\/item>/g;
+    let match;
+    while ((match = itemRegex.exec(res.body)) !== null) {
+      const block = match[1];
+      const titleMatch = block.match(/<title><!\[CDATA\[(.*?)\]\]><\/title>/) || block.match(/<title>(.*?)<\/title>/);
+      const trafficMatch = block.match(/<ht:approx_traffic>(.*?)<\/ht:approx_traffic>/);
+      const newsMatch = block.match(/<ht:news_item_title><!\[CDATA\[(.*?)\]\]><\/ht:news_item_title>/);
+      const newsUrlMatch = block.match(/<ht:news_item_url><!\[CDATA\[(.*?)\]\]><\/ht:news_item_url>/);
+      const pictureMatch = block.match(/<ht:picture>(.*?)<\/ht:picture>/);
+      if (titleMatch) {
+        items.push({
+          title: titleMatch[1].trim(),
+          traffic: trafficMatch ? trafficMatch[1].trim() : "N/A",
+          newsTitle: newsMatch ? newsMatch[1].trim() : null,
+          newsUrl: newsUrlMatch ? newsUrlMatch[1].trim() : null,
+          picture: pictureMatch ? pictureMatch[1].trim() : null
+        });
+      }
+    }
+    return items.slice(0, 5);
+  } catch (e) {
+    console.error("Google Trends error:", e.message);
+    return [];
+  }
+}
+
+// ─── Reddit fetcher ───────────────────────────────────────────────────────────
+async function fetchReddit(subreddit, limit = 3) {
+  try {
+    const url = `https://www.reddit.com/r/${subreddit}/hot.json?limit=${limit}`;
+    const res = await fetchUrl(url, { "Accept": "application/json" });
+    if (res.status !== 200) return [];
+    const json = JSON.parse(res.body);
+    return (json?.data?.children || [])
+      .filter(p => !p.data.stickied)
+      .map(p => ({
+        title: p.data.title,
+        url: `https://reddit.com${p.data.permalink}`,
+        score: p.data.score,
+        preview: p.data.preview?.images?.[0]?.source?.url?.replace(/&amp;/g, "&") || null,
+        thumbnail: (p.data.thumbnail?.startsWith("http")) ? p.data.thumbnail : null,
+        externalUrl: p.data.url || null,
+        subreddit: p.data.subreddit
+      }));
+  } catch (e) {
+    console.error(`Reddit error (${subreddit}):`, e.message);
+    return [];
+  }
+}
+
+async function fetchTikTokRedditTrends() {
+  const all = [];
+  for (const sub of ["TikTokTrends", "tiktok", "blowup", "viral"]) {
+    const posts = await fetchReddit(sub, 3);
+    all.push(...posts);
+  }
+  const seen = new Set();
+  return all
+    .filter(p => { if (seen.has(p.title)) return false; seen.add(p.title); return true; })
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 6);
+}
+
+// ─── Send full digest ─────────────────────────────────────────────────────────
+async function sendTrendDigest(chatId) {
+  await sendMessage(chatId, "🔄 <b>Fetching live trends...</b>");
+
+  // Google Trends
+  const googleTrends = await fetchGoogleTrends();
+  if (googleTrends.length > 0) {
+    let msg = "📈 <b>GOOGLE TRENDS — Trending in the US</b>\n\n";
+    googleTrends.forEach((t, i) => {
+      msg += `<b>${i + 1}. ${t.title}</b>\n🔍 ${t.traffic} searches\n`;
+      if (t.newsTitle && t.newsUrl) msg += `📰 <a href="${t.newsUrl}">${t.newsTitle}</a>\n`;
+      msg += "\n";
+    });
+    msg += `<i>Updated: ${new Date().toUTCString()}</i>`;
+    const withPic = googleTrends.find(t => t.picture);
+    if (withPic?.picture) {
+      try { await sendPhoto(chatId, withPic.picture, msg); }
+      catch { await sendMessage(chatId, msg); }
+    } else {
+      await sendMessage(chatId, msg);
+    }
+  } else {
+    await sendMessage(chatId, "⚠️ Google Trends unavailable right now.");
+  }
+
+  await new Promise(r => setTimeout(r, 1500));
+
+  // Reddit
+  const redditPosts = await fetchTikTokRedditTrends();
+  if (redditPosts.length > 0) {
+    await sendMessage(chatId, "🎵 <b>TIKTOK TRENDS — Hot on Reddit</b>\n\nSending top posts with links 👇");
+    for (const post of redditPosts) {
+      const caption =
+        `🔥 <b>${post.title}</b>\n\n` +
+        `📊 ${post.score.toLocaleString()} upvotes • r/${post.subreddit}\n` +
+        `🔗 <a href="${post.url}">View on Reddit</a>` +
+        (post.externalUrl && post.externalUrl !== post.url ? `\n🎬 <a href="${post.externalUrl}">View Content</a>` : "");
+      const img = post.preview || post.thumbnail;
+      if (img) {
+        try { await sendPhoto(chatId, img, caption); }
+        catch { await sendMessage(chatId, caption); }
+      } else {
+        await sendMessage(chatId, caption);
+      }
+      await new Promise(r => setTimeout(r, 800));
+    }
+  } else {
+    await sendMessage(chatId, "⚠️ Reddit trends unavailable right now.");
+  }
+
+  await sendMessage(chatId,
+    `✅ <b>Done!</b> Next auto-update in <b>1 hour</b>\n💡 Tap <b>🔥 Live Trends Now</b> anytime for a fresh update`,
+    WEBAPP_URL ? { reply_markup: { inline_keyboard: [[{ text: "📱 Open Full Tracker", web_app: { url: WEBAPP_URL } }]] } } : {}
   );
 }
 
-function hotTrendsMessage(filter = "all") {
-  let list = filter === "all" ? trends : trends.filter(t => t.cat === filter);
-  list = [...list].sort((a, b) => b.heat - a.heat).slice(0, 5);
-
-  const header = filter === "all"
-    ? "🔥 <b>TOP 5 HOTTEST TRENDS RIGHT NOW</b>\n\n"
-    : `🔥 <b>TOP ${filter.toUpperCase()} TRENDS</b>\n\n`;
-
-  return header + list.map((t, i) =>
-    `<b>${i + 1}.</b> ${t.emoji} ${t.title} — 🔥 ${t.heat} | 👁 ${t.views}${t.rising ? " 📈" : ""}`
-  ).join("\n");
+// ─── State ────────────────────────────────────────────────────────────────────
+const subscribers = new Set();
+const userAlerts = {};
+function getAlerts(chatId) {
+  if (!userAlerts[chatId]) userAlerts[chatId] = new Set();
+  return userAlerts[chatId];
 }
 
-function risingMessage() {
-  const rising = trends.filter(t => t.rising);
-  return (
-    "📈 <b>RISING FAST — Watch These Now</b>\n\n" +
-    rising.map(t =>
-      `${t.emoji} <b>${t.title}</b> [${t.cat}]\n🔥 Heat: ${t.heat} | 👁 ${t.views}\n${t.tags.slice(0,2).join(" ")}`
-    ).join("\n\n")
-  );
-}
-
-function alertsMatchMessage(t) {
-  return (
-    `🔔 <b>TREND ALERT MATCH!</b>\n\n` +
-    formatTrend(t) + "\n\n" +
-    `<i>This matched one of your keywords.</i>`
-  );
-}
-
-// ─── Keyboards ────────────────────────────────────────────────────────────────
 const mainKeyboard = {
   keyboard: [
-    ["🔥 Hot Trends", "📈 Rising Fast"],
-    ["🐾 Animals", "😂 Memes"],
-    ["🧸 Toys", "📊 Viral Trends"],
-    ["🔔 My Alerts", "📱 Open Full Tracker"]
+    ["🔥 Live Trends Now", "📈 Google Trends"],
+    ["🎵 TikTok Reddit", "🔔 My Alerts"],
+    ["⏰ Subscribe Hourly", "🔕 Unsubscribe"],
+    ["📱 Open Full Tracker", "/help"]
   ],
   resize_keyboard: true
 };
 
-function openAppButton() {
-  return {
-    inline_keyboard: [[
-      {
-        text: "📱 Open TrendPulse Tracker",
-        web_app: { url: WEBAPP_URL }
-      }
-    ]]
-  };
-}
-
-// ─── Command / message handler ────────────────────────────────────────────────
+// ─── Message handler ──────────────────────────────────────────────────────────
 async function handleMessage(msg) {
   const chatId = msg.chat.id;
   const text = (msg.text || "").trim();
-  const user = getUser(chatId);
 
-  // ── /start
-  if (text === "/start" || text === "🏠 Home") {
+  if (text === "/start") {
+    subscribers.add(chatId);
     await sendMessage(chatId,
-      `👋 <b>Welcome to TrendPulse!</b>\n\n` +
-      `Your personal TikTok trend tracker for:\n` +
-      `🐾 Animals  😂 Memes  🧸 Toys  📊 Viral Trends\n\n` +
-      `Use the menu below to explore — or open the full interactive tracker.\n\n` +
-      `<b>Commands:</b>\n` +
-      `/trends — Top trending now\n` +
-      `/rising — Rising fast\n` +
-      `/alert [keyword] — Set a keyword alert\n` +
-      `/myalerts — See your alerts\n` +
-      `/removealert [keyword] — Remove an alert\n` +
-      `/help — Show this message`,
+      `🚀 <b>Welcome to TrendPulse Live!</b>\n\n` +
+      `I send you real trending content every hour:\n` +
+      `📈 <b>Google Trends</b> — what the world is searching\n` +
+      `🎵 <b>Reddit TikTok</b> — viral videos & images with links\n\n` +
+      `You're now <b>subscribed to hourly updates</b> ✅\n\n` +
+      `Tap <b>🔥 Live Trends Now</b> for an instant digest!`,
       { reply_markup: mainKeyboard }
     );
     return;
   }
 
-  // ── /help
   if (text === "/help") {
     await sendMessage(chatId,
-      `<b>TrendPulse Commands</b>\n\n` +
-      `/trends — Top 5 hottest trends\n` +
-      `/rising — Trends rising fast right now\n` +
-      `/animals — Top animal trends\n` +
-      `/memes — Top meme trends\n` +
-      `/toys — Top toy trends\n` +
-      `/viral — Top viral trends\n` +
-      `/alert [keyword] — e.g. /alert cat\n` +
-      `/myalerts — List your active alerts\n` +
-      `/removealert [keyword] — Remove a keyword alert\n` +
-      `/app — Open the full tracker`,
+      `<b>Commands:</b>\n\n` +
+      `/trends — Fresh trend digest now\n` +
+      `/google — Google Trends only\n` +
+      `/reddit — Reddit TikTok only\n` +
+      `/subscribe — Hourly auto-updates on\n` +
+      `/unsubscribe — Hourly auto-updates off\n` +
+      `/alert cat — Alert when "cat" trends\n` +
+      `/myalerts — Your active alerts\n` +
+      `/removealert cat — Remove alert\n` +
+      `/app — Open full tracker`,
       { reply_markup: mainKeyboard }
     );
     return;
   }
 
-  // ── /trends or button
-  if (text === "/trends" || text === "🔥 Hot Trends") {
-    await sendMessage(chatId, hotTrendsMessage("all"), {
-      reply_markup: {
-        inline_keyboard: [[{ text: "📱 See Full Dashboard", web_app: { url: WEBAPP_URL } }]]
-      }
-    });
+  if (text === "/trends" || text === "🔥 Live Trends Now") {
+    await sendTrendDigest(chatId);
     return;
   }
 
-  // ── /rising or button
-  if (text === "/rising" || text === "📈 Rising Fast") {
-    await sendMessage(chatId, risingMessage(), {
-      reply_markup: {
-        inline_keyboard: [[{ text: "📱 See Full Dashboard", web_app: { url: WEBAPP_URL } }]]
-      }
+  if (text === "/google" || text === "📈 Google Trends") {
+    await sendMessage(chatId, "⏳ Fetching Google Trends...");
+    const trends = await fetchGoogleTrends();
+    if (!trends.length) { await sendMessage(chatId, "⚠️ Unavailable right now, try again shortly."); return; }
+    let msg = "📈 <b>GOOGLE TRENDS — US Right Now</b>\n\n";
+    trends.forEach((t, i) => {
+      msg += `<b>${i + 1}. ${t.title}</b> — 🔍 ${t.traffic}\n`;
+      if (t.newsTitle && t.newsUrl) msg += `   📰 <a href="${t.newsUrl}">${t.newsTitle}</a>\n`;
+      msg += "\n";
     });
+    const pic = trends.find(t => t.picture);
+    if (pic?.picture) { try { await sendPhoto(chatId, pic.picture, msg); return; } catch {} }
+    await sendMessage(chatId, msg);
     return;
   }
 
-  // ── Category filters
-  const catMap = {
-    "/animals": "animals", "🐾 Animals": "animals",
-    "/memes": "memes", "😂 Memes": "memes",
-    "/toys": "toys", "🧸 Toys": "toys",
-    "/viral": "trends", "📊 Viral Trends": "trends"
-  };
-
-  if (catMap[text]) {
-    const cat = catMap[text];
-    const list = [...trends].filter(t => t.cat === cat).sort((a, b) => b.heat - a.heat).slice(0, 3);
-    const msgs = list.map(t => formatTrend(t)).join("\n\n─────────────────\n\n");
-    await sendMessage(chatId, `📂 <b>TOP ${cat.toUpperCase()} TRENDS</b>\n\n` + msgs, {
-      reply_markup: {
-        inline_keyboard: [[{ text: "📱 See All in App", web_app: { url: WEBAPP_URL } }]]
-      }
-    });
+  if (text === "/reddit" || text === "🎵 TikTok Reddit") {
+    await sendMessage(chatId, "⏳ Fetching Reddit TikTok trends...");
+    const posts = await fetchTikTokRedditTrends();
+    if (!posts.length) { await sendMessage(chatId, "⚠️ Unavailable right now, try again shortly."); return; }
+    for (const post of posts) {
+      const caption =
+        `🔥 <b>${post.title}</b>\n\n` +
+        `📊 ${post.score.toLocaleString()} upvotes • r/${post.subreddit}\n` +
+        `🔗 <a href="${post.url}">View on Reddit</a>` +
+        (post.externalUrl && post.externalUrl !== post.url ? `\n🎬 <a href="${post.externalUrl}">View Content</a>` : "");
+      const img = post.preview || post.thumbnail;
+      if (img) { try { await sendPhoto(chatId, img, caption); } catch { await sendMessage(chatId, caption); } }
+      else { await sendMessage(chatId, caption); }
+      await new Promise(r => setTimeout(r, 800));
+    }
     return;
   }
 
-  // ── /app or button
+  if (text === "/subscribe" || text === "⏰ Subscribe Hourly") {
+    subscribers.add(chatId);
+    await sendMessage(chatId, "✅ <b>Subscribed!</b> You'll get a trend digest every hour.\n\nUse /unsubscribe to stop.");
+    return;
+  }
+
+  if (text === "/unsubscribe" || text === "🔕 Unsubscribe") {
+    subscribers.delete(chatId);
+    await sendMessage(chatId, "🔕 <b>Unsubscribed.</b> No more hourly updates.\n\nUse /subscribe to turn back on.");
+    return;
+  }
+
   if (text === "/app" || text === "📱 Open Full Tracker") {
-    await sendMessage(chatId,
-      "📱 <b>Open TrendPulse</b>\n\nTap below to launch the full interactive tracker with live filters, watchlist, and hashtag charts.",
-      { reply_markup: openAppButton() }
+    await sendMessage(chatId, "📱 Open TrendPulse:",
+      WEBAPP_URL ? { reply_markup: { inline_keyboard: [[{ text: "📱 Open TrendPulse", web_app: { url: WEBAPP_URL } }]] } } : {}
     );
     return;
   }
 
-  // ── /alert [keyword]
-  if (text.startsWith("/alert ") || text.startsWith("/alert\n")) {
-    const keyword = text.replace("/alert", "").trim().toLowerCase();
-    if (!keyword) {
-      await sendMessage(chatId, "⚠️ Usage: <code>/alert [keyword]</code>\nExample: <code>/alert cat</code>");
-      return;
-    }
-    user.alerts.add(keyword);
-    await sendMessage(chatId,
-      `🔔 Alert set for <b>"${keyword}"</b>!\n\nI'll notify you whenever a trend matches this keyword.\n\nYour active alerts: ${[...user.alerts].map(a => `<code>${a}</code>`).join(", ")}`
-    );
-    // Immediately check existing trends
-    const matches = trends.filter(t =>
-      t.title.toLowerCase().includes(keyword) ||
-      t.desc.toLowerCase().includes(keyword) ||
-      t.tags.some(tag => tag.toLowerCase().includes(keyword)) ||
-      t.cat.toLowerCase().includes(keyword)
-    );
-    if (matches.length > 0) {
-      await sendMessage(chatId,
-        `✅ <b>${matches.length} existing trend(s) match "${keyword}":</b>\n\n` +
-        matches.map(t => `${t.emoji} ${t.title} — 🔥 ${t.heat}`).join("\n")
-      );
-    }
+  if (text.startsWith("/alert ")) {
+    const kw = text.replace("/alert", "").trim().toLowerCase();
+    if (!kw) { await sendMessage(chatId, "Usage: <code>/alert cat</code>"); return; }
+    getAlerts(chatId).add(kw);
+    await sendMessage(chatId, `🔔 Alert set for <b>"${kw}"</b>!\n\nActive: ${[...getAlerts(chatId)].map(a => `<code>${a}</code>`).join(", ")}`);
     return;
   }
 
-  // ── /myalerts or button
   if (text === "/myalerts" || text === "🔔 My Alerts") {
-    if (user.alerts.size === 0) {
-      await sendMessage(chatId,
-        "🔔 <b>Your Alerts</b>\n\nYou have no alerts set.\n\nUse <code>/alert [keyword]</code> to set one.\nExample: <code>/alert cat</code>"
-      );
-    } else {
-      await sendMessage(chatId,
-        `🔔 <b>Your Active Alerts</b>\n\n` +
-        [...user.alerts].map((a, i) => `${i + 1}. <code>${a}</code>`).join("\n") +
-        "\n\nUse <code>/removealert [keyword]</code> to remove one."
-      );
-    }
+    const alerts = getAlerts(chatId);
+    if (!alerts.size) { await sendMessage(chatId, "No alerts. Use <code>/alert [keyword]</code>"); return; }
+    await sendMessage(chatId, `🔔 <b>Alerts:</b>\n\n${[...alerts].map((a,i) => `${i+1}. <code>${a}</code>`).join("\n")}\n\nRemove: <code>/removealert [keyword]</code>`);
     return;
   }
 
-  // ── /removealert [keyword]
   if (text.startsWith("/removealert ")) {
-    const keyword = text.replace("/removealert", "").trim().toLowerCase();
-    if (user.alerts.has(keyword)) {
-      user.alerts.delete(keyword);
-      await sendMessage(chatId, `✅ Alert for <b>"${keyword}"</b> removed.`);
-    } else {
-      await sendMessage(chatId, `⚠️ No alert found for <b>"${keyword}"</b>.`);
-    }
+    const kw = text.replace("/removealert", "").trim().toLowerCase();
+    if (getAlerts(chatId).has(kw)) { getAlerts(chatId).delete(kw); await sendMessage(chatId, `✅ Removed alert for <b>"${kw}"</b>`); }
+    else { await sendMessage(chatId, `⚠️ No alert for <b>"${kw}"</b>`); }
     return;
   }
 
-  // ── Unknown
-  await sendMessage(chatId,
-    `❓ I didn't understand that. Use the menu below or type /help.`,
-    { reply_markup: mainKeyboard }
-  );
+  await sendMessage(chatId, "❓ Use the menu or /help", { reply_markup: mainKeyboard });
+}
+
+// ─── Keyword alert checker ────────────────────────────────────────────────────
+async function checkKeywordAlerts(googleTrends, redditPosts) {
+  for (const [chatId, keywords] of Object.entries(userAlerts)) {
+    if (!keywords.size) continue;
+    for (const kw of keywords) {
+      const gMatch = googleTrends.find(t => t.title.toLowerCase().includes(kw));
+      if (gMatch) {
+        await sendMessage(chatId,
+          `🔔 <b>ALERT: "${kw}" is trending on Google!</b>\n\n` +
+          `<b>${gMatch.title}</b> — ${gMatch.traffic} searches\n` +
+          (gMatch.newsUrl ? `📰 <a href="${gMatch.newsUrl}">${gMatch.newsTitle}</a>` : "")
+        ).catch(() => {});
+      }
+      const rMatch = redditPosts.find(p => p.title.toLowerCase().includes(kw));
+      if (rMatch) {
+        const caption = `🔔 <b>ALERT: "${kw}" trending on Reddit!</b>\n\n<b>${rMatch.title}</b>\n📊 ${rMatch.score.toLocaleString()} upvotes\n🔗 <a href="${rMatch.url}">View Post</a>`;
+        if (rMatch.preview) { await sendPhoto(chatId, rMatch.preview, caption).catch(async () => sendMessage(chatId, caption).catch(() => {})); }
+        else { await sendMessage(chatId, caption).catch(() => {}); }
+      }
+    }
+  }
+}
+
+// ─── Hourly broadcast ─────────────────────────────────────────────────────────
+async function hourlyBroadcast() {
+  if (!subscribers.size) return;
+  console.log(`📡 Broadcasting to ${subscribers.size} subscriber(s)...`);
+  const googleTrends = await fetchGoogleTrends();
+  const redditPosts = await fetchTikTokRedditTrends();
+  for (const chatId of [...subscribers]) {
+    try {
+      await sendTrendDigest(chatId);
+      await new Promise(r => setTimeout(r, 1000));
+    } catch (e) {
+      console.error(`Broadcast error ${chatId}:`, e.message);
+      subscribers.delete(chatId);
+    }
+  }
+  await checkKeywordAlerts(googleTrends, redditPosts);
 }
 
 // ─── Polling ──────────────────────────────────────────────────────────────────
 let offset = 0;
-
 async function poll() {
   try {
-    const res = await apiCall("getUpdates", {
-      offset,
-      timeout: 30,
-      allowed_updates: ["message"]
-    });
-
+    const res = await apiCall("getUpdates", { offset, timeout: 30, allowed_updates: ["message"] });
     if (res.ok && res.result.length > 0) {
       for (const update of res.result) {
         offset = update.update_id + 1;
         if (update.message) {
-          try {
-            await handleMessage(update.message);
-          } catch (e) {
-            console.error("Handler error:", e.message);
-          }
+          try { await handleMessage(update.message); }
+          catch (e) { console.error("Handler error:", e.message); }
         }
       }
     }
   } catch (e) {
     console.error("Poll error:", e.message);
+    await new Promise(r => setTimeout(r, 5000));
   }
-
-  // Poll again immediately
   setImmediate(poll);
 }
 
-// ─── Scheduled alert broadcasts (every 2 hours) ───────────────────────────────
-async function broadcastAlerts() {
-  const risingTrends = trends.filter(t => t.rising);
-
-  for (const [chatId, state] of Object.entries(userState)) {
-    if (!state.alertsEnabled || state.alerts.size === 0) continue;
-
-    for (const keyword of state.alerts) {
-      const matches = risingTrends.filter(t =>
-        t.title.toLowerCase().includes(keyword) ||
-        t.desc.toLowerCase().includes(keyword) ||
-        t.tags.some(tag => tag.toLowerCase().includes(keyword)) ||
-        t.cat.toLowerCase().includes(keyword)
-      );
-
-      for (const match of matches) {
-        try {
-          await sendMessage(chatId, alertsMatchMessage(match), {
-            reply_markup: {
-              inline_keyboard: [[{ text: "📱 View in Tracker", web_app: { url: WEBAPP_URL } }]]
-            }
-          });
-        } catch (e) {
-          console.error(`Alert send error for ${chatId}:`, e.message);
-        }
-      }
-    }
-  }
-}
-
-// ─── Keep-alive HTTP server (for hosting platforms like Railway/Render) ────────
-http.createServer((req, res) => {
-  res.writeHead(200);
-  res.end("TrendPulse Bot is running ✅");
-}).listen(process.env.PORT || 3000);
+// ─── Keep-alive ───────────────────────────────────────────────────────────────
+http.createServer((req, res) => { res.writeHead(200); res.end("TrendPulse Live ✅"); }).listen(process.env.PORT || 3000);
 
 // ─── Start ────────────────────────────────────────────────────────────────────
-console.log("🚀 TrendPulse Bot starting...");
-
-// Delete any existing webhook so long polling works
+console.log("🚀 TrendPulse Live Bot starting...");
 apiCall("deleteWebhook", {}).then(() => {
-  console.log("✅ Webhook cleared — starting long poll");
+  console.log("✅ Ready — polling started");
   poll();
-  // Broadcast alerts every 2 hours
-  setInterval(broadcastAlerts, 2 * 60 * 60 * 1000);
-  console.log("🔔 Alert scheduler running (every 2 hours)");
+  setInterval(hourlyBroadcast, 60 * 60 * 1000);
+  setTimeout(hourlyBroadcast, 5000);
+  console.log("⏰ Hourly broadcast scheduled");
 }).catch(console.error);
